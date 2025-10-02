@@ -1,0 +1,301 @@
+---
+# rbcapp1 Status Checking Tasks
+# This file contains tasks to check application status via REST API from Test 1
+
+- name: Display status checking header
+  debug:
+    msg: |
+      =====================================
+      rbcapp1 Application Status Check
+      =====================================
+      API Base URL: {{ rbcapp1_api_base_url }}
+      Checking via REST API from Test 1
+      =====================================
+  run_once: true
+  delegate_to: localhost
+
+- name: Check rbcapp1 API connectivity
+  uri:
+    url: "{{ rbcapp1_api_base_url }}/healthcheck"
+    method: GET
+    timeout: 10
+    status_code: [200, 503]
+  register: api_connectivity_check
+  delegate_to: localhost
+  run_once: true
+  ignore_errors: yes
+
+- name: Display API connectivity status
+  debug:
+    msg: |
+      API Connectivity Check:
+      {% if api_connectivity_check is succeeded %}
+      ✅ rbcapp1 API is reachable
+      - URL: {{ rbcapp1_api_base_url }}/healthcheck
+      - Status Code: {{ api_connectivity_check.status }}
+      - Response Time: {{ api_connectivity_check.elapsed }}s
+      {% else %}
+      ❌ rbcapp1 API is not reachable
+      - URL: {{ rbcapp1_api_base_url }}/healthcheck
+      - Error: {{ api_connectivity_check.msg | default('Connection failed') }}
+      {% endif %}
+  run_once: true
+  delegate_to: localhost
+
+# Get overall application status
+- name: Query rbcapp1 application status
+  uri:
+    url: "{{ rbcapp1_api_base_url }}/healthcheck"
+    method: GET
+    timeout: 10
+    return_content: yes
+  register: rbcapp1_status_response
+  delegate_to: localhost
+  run_once: true
+  when: api_connectivity_check is succeeded
+
+- name: Parse rbcapp1 status response
+  set_fact:
+    rbcapp1_status_data: "{{ rbcapp1_status_response.content | from_json }}"
+  delegate_to: localhost
+  run_once: true
+  when: rbcapp1_status_response is defined and rbcapp1_status_response is succeeded
+
+- name: Identify services that are down
+  set_fact:
+    services_down: |
+      {% set down_services = [] %}
+      {% if rbcapp1_status_data is defined and rbcapp1_status_data.services is defined %}
+      {% for service, status in rbcapp1_status_data.services.items() %}
+      {% if status == 'DOWN' %}
+      {% set _ = down_services.append(service) %}
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+      {{ down_services }}
+    services_up: |
+      {% set up_services = [] %}
+      {% if rbcapp1_status_data is defined and rbcapp1_status_data.services is defined %}
+      {% for service, status in rbcapp1_status_data.services.items() %}
+      {% if status == 'UP' %}
+      {% set _ = up_services.append(service) %}
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+      {{ up_services }}
+  delegate_to: localhost
+  run_once: true
+  when: rbcapp1_status_data is defined
+
+- name: Parse service lists
+  set_fact:
+    parsed_services_down: "{{ services_down | from_yaml }}"
+    parsed_services_up: "{{ services_up | from_yaml }}"
+  delegate_to: localhost
+  run_once: true
+  when: services_down is defined and services_up is defined
+
+# Check individual service status for detailed reporting
+- name: Check individual service status
+  uri:
+    url: "{{ rbcapp1_api_base_url }}/healthcheck/{{ item }}"
+    method: GET
+    timeout: 5
+    return_content: yes
+    status_code: [200, 404]
+  register: individual_service_status
+  delegate_to: localhost
+  run_once: true
+  loop:
+    - httpd
+    - rabbitmq
+    - postgresql
+    - rbcapp1
+  when: api_connectivity_check is succeeded
+  ignore_errors: yes
+
+- name: Process individual service responses
+  set_fact:
+    detailed_service_status: |
+      {% set service_details = {} %}
+      {% if individual_service_status is defined %}
+      {% for result in individual_service_status.results %}
+      {% set service_name = result.item %}
+      {% if result is succeeded and result.status == 200 %}
+      {% set service_data = result.content | from_json %}
+      {% set _ = service_details.update({service_name: {
+        'status': service_data.service_status,
+        'host': service_data.host_name | default('unknown'),
+        'last_updated': service_data.last_updated | default('unknown'),
+        'available': true
+      }}) %}
+      {% else %}
+      {% set _ = service_details.update({service_name: {
+        'status': 'UNKNOWN',
+        'host': 'unknown',
+        'last_updated': 'unknown',
+        'available': false,
+        'error': result.msg | default('Service not found')
+      }}) %}
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+      {{ service_details }}
+  delegate_to: localhost
+  run_once: true
+  when: individual_service_status is defined
+
+- name: Parse detailed service status
+  set_fact:
+    parsed_detailed_status: "{{ detailed_service_status | from_yaml }}"
+  delegate_to: localhost
+  run_once: true
+  when: detailed_service_status is defined
+
+# Display comprehensive status report
+- name: Display rbcapp1 application status
+  debug:
+    msg: |
+      =====================================
+      rbcapp1 Application Status Report
+      =====================================
+      
+      {% if api_connectivity_check is succeeded %}
+      🔗 API Status: Connected
+      📊 Overall Application Status: 
+      {% if rbcapp1_status_data is defined %}
+      
+      Services Summary:
+      {% if rbcapp1_status_data.services is defined %}
+      {% for service, status in rbcapp1_status_data.services.items() %}
+      {% if status == 'UP' %}
+      ✅ {{ service }}: {{ status }}
+      {% else %}
+      ❌ {{ service }}: {{ status }}
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+      
+      {% if parsed_services_down is defined and parsed_services_down | length > 0 %}
+      🚨 Services Currently DOWN:
+      {% for service in parsed_services_down %}
+      - {{ service }}
+      {% endfor %}
+      {% else %}
+      ✅ All services are UP
+      {% endif %}
+      
+      {% if parsed_services_up is defined %}
+      ✅ Services Currently UP: {{ parsed_services_up | length }}
+      {% endif %}
+      
+      {% else %}
+      ❌ Unable to retrieve application status
+      {% endif %}
+      
+      {% else %}
+      ❌ API Status: Disconnected
+      Cannot retrieve rbcapp1 application status - API is not accessible
+      {% endif %}
+      
+      =====================================
+  run_once: true
+  delegate_to: localhost
+
+- name: Display detailed service information
+  debug:
+    msg: |
+      =====================================
+      Detailed Service Status Information
+      =====================================
+      {% if parsed_detailed_status is defined %}
+      {% for service, details in parsed_detailed_status.items() %}
+      
+      Service: {{ service }}
+      {% if details.available %}
+      - Status: {{ details.status }}
+      - Host: {{ details.host }}
+      - Last Updated: {{ details.last_updated }}
+      {% else %}
+      - Status: {{ details.status }}
+      - Error: {{ details.error }}
+      {% endif %}
+      {% endfor %}
+      {% else %}
+      No detailed service information available
+      {% endif %}
+      =====================================
+  run_once: true
+  delegate_to: localhost
+  when: parsed_detailed_status is defined
+
+# Create summary for potential integration or logging
+- name: Create status check summary
+  set_fact:
+    status_check_summary:
+      timestamp: "{{ ansible_date_time.iso8601 }}"
+      api_accessible: "{{ api_connectivity_check is succeeded }}"
+      api_url: "{{ rbcapp1_api_base_url }}"
+      services_total: "{{ rbcapp1_status_data.services | length if rbcapp1_status_data is defined and rbcapp1_status_data.services is defined else 0 }}"
+      services_up: "{{ parsed_services_up | length if parsed_services_up is defined else 0 }}"
+      services_down: "{{ parsed_services_down | length if parsed_services_down is defined else 0 }}"
+      services_down_list: "{{ parsed_services_down if parsed_services_down is defined else [] }}"
+      overall_status: "{{ 'HEALTHY' if (parsed_services_down is defined and parsed_services_down | length == 0) else 'DEGRADED' if api_connectivity_check is succeeded else 'UNKNOWN' }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Display status check summary
+  debug:
+    msg: |
+      =====================================
+      Status Check Summary
+      =====================================
+      Timestamp: {{ status_check_summary.timestamp }}
+      API Accessible: {{ status_check_summary.api_accessible }}
+      Overall Status: {{ status_check_summary.overall_status }}
+      
+      Service Counts:
+      - Total Services: {{ status_check_summary.services_total }}
+      - Services UP: {{ status_check_summary.services_up }}
+      - Services DOWN: {{ status_check_summary.services_down }}
+      
+      {% if status_check_summary.services_down > 0 %}
+      Services Requiring Attention:
+      {% for service in status_check_summary.services_down_list %}
+      - {{ service }}
+      {% endfor %}
+      {% endif %}
+      =====================================
+  run_once: true
+  delegate_to: localhost
+
+# Handle API unavailable scenario
+- name: Display API unavailable message
+  debug:
+    msg: |
+      =====================================
+      rbcapp1 API Unavailable
+      =====================================
+      
+      ❌ Cannot connect to rbcapp1 monitoring API
+      
+      API Details:
+      - URL: {{ rbcapp1_api_base_url }}
+      - Error: {{ api_connectivity_check.msg | default('Connection timeout or refused') }}
+      
+      Possible Causes:
+      - rbcapp1 monitoring API (Test 1) is not running
+      - Network connectivity issues
+      - Firewall blocking access to port {{ rbcapp1_api_port }}
+      - API host {{ rbcapp1_api_host }} is incorrect
+      
+      Troubleshooting Steps:
+      1. Verify rbcapp1 API is running: curl {{ rbcapp1_api_base_url }}/healthcheck
+      2. Check network connectivity to {{ rbcapp1_api_host }}:{{ rbcapp1_api_port }}
+      3. Verify firewall rules allow access to port {{ rbcapp1_api_port }}
+      4. Check API logs for errors
+      
+      =====================================
+  run_once: true
+  delegate_to: localhost
+  when: api_connectivity_check is failed

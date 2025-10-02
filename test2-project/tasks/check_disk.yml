@@ -1,0 +1,203 @@
+---
+# Disk Space Monitoring and Alerting Tasks
+# This file contains tasks to check disk usage and send email alerts
+
+- name: Display disk monitoring header
+  debug:
+    msg: |
+      =====================================
+      Disk Space Monitoring
+      =====================================
+      Host: {{ inventory_hostname }}
+      Threshold: {{ disk_usage_threshold }}%
+      =====================================
+
+- name: Gather disk usage information
+  setup:
+    filter: ansible_mounts
+  register: disk_facts
+
+- name: Calculate disk usage for each mount point
+  set_fact:
+    disk_usage_info: |
+      {% set disk_info = [] %}
+      {% for mount in ansible_mounts %}
+      {% if mount.size_total > 0 %}
+      {% set usage_percent = ((mount.size_total - mount.size_available) / mount.size_total * 100) | round(1) %}
+      {% set _ = disk_info.append({
+        'device': mount.device,
+        'mount': mount.mount,
+        'fstype': mount.fstype,
+        'size_total': mount.size_total,
+        'size_used': mount.size_total - mount.size_available,
+        'size_available': mount.size_available,
+        'usage_percent': usage_percent,
+        'alert_required': usage_percent > disk_usage_threshold,
+        'size_total_gb': (mount.size_total / 1024 / 1024 / 1024) | round(2),
+        'size_used_gb': ((mount.size_total - mount.size_available) / 1024 / 1024 / 1024) | round(2),
+        'size_available_gb': (mount.size_available / 1024 / 1024 / 1024) | round(2)
+      }) %}
+      {% endif %}
+      {% endfor %}
+      {{ disk_info }}
+
+- name: Parse disk usage information
+  set_fact:
+    parsed_disk_info: "{{ disk_usage_info | from_yaml }}"
+
+- name: Display disk usage for all mount points
+  debug:
+    msg: |
+      Disk Usage Report for {{ inventory_hostname }}:
+      {% for disk in parsed_disk_info %}
+      
+      Mount Point: {{ disk.mount }}
+        Device: {{ disk.device }}
+        Filesystem: {{ disk.fstype }}
+        Total Size: {{ disk.size_total_gb }} GB
+        Used Space: {{ disk.size_used_gb }} GB
+        Available: {{ disk.size_available_gb }} GB
+        Usage: {{ disk.usage_percent }}%
+        Alert Required: {{ disk.alert_required }}
+      {% endfor %}
+
+- name: Identify high usage filesystems
+  set_fact:
+    high_usage_disks: "{{ parsed_disk_info | selectattr('alert_required', 'equalto', true) | list }}"
+
+- name: Display high usage alert
+  debug:
+    msg: |
+      ⚠️  HIGH DISK USAGE ALERT ⚠️
+      Host: {{ inventory_hostname }}
+      
+      Critical filesystems (>{{ disk_usage_threshold }}%):
+      {% for disk in high_usage_disks %}
+      - {{ disk.mount }}: {{ disk.usage_percent }}% used ({{ disk.size_used_gb }}/{{ disk.size_total_gb }} GB)
+      {% endfor %}
+  when: high_usage_disks | length > 0
+
+- name: Create disk usage summary for email
+  set_fact:
+    disk_summary:
+      host: "{{ inventory_hostname }}"
+      total_mounts: "{{ parsed_disk_info | length }}"
+      high_usage_count: "{{ high_usage_disks | length }}"
+      high_usage_details: "{{ high_usage_disks }}"
+      all_disks: "{{ parsed_disk_info }}"
+
+- name: Add to global disk monitoring results
+  set_fact:
+    global_disk_results: "{{ global_disk_results | default([]) + [disk_summary] }}"
+  delegate_to: localhost
+  delegate_facts: yes
+
+# Email alerting tasks (run once after all hosts are processed)
+- name: Prepare email alert data
+  set_fact:
+    alert_hosts: "{{ global_disk_results | selectattr('high_usage_count', 'greaterthan', 0) | list }}"
+    total_alerts: "{{ global_disk_results | map(attribute='high_usage_count') | sum }}"
+  delegate_to: localhost
+  run_once: true
+  when: global_disk_results is defined
+
+- name: Generate email alert content
+  set_fact:
+    email_subject: "🚨 Disk Usage Alert - {{ alert_hosts | length }} hosts with high disk usage"
+    email_body: |
+      Disk Usage Alert Report
+      ======================
+      
+      Alert Threshold: {{ disk_usage_threshold }}%
+      Total Hosts Checked: {{ global_disk_results | length }}
+      Hosts with Alerts: {{ alert_hosts | length }}
+      Total Critical Filesystems: {{ total_alerts }}
+      
+      Detailed Report:
+      {% for host_data in alert_hosts %}
+      
+      Host: {{ host_data.host }}
+      Critical Filesystems: {{ host_data.high_usage_count }}
+      {% for disk in host_data.high_usage_details %}
+      - {{ disk.mount }} ({{ disk.device }}): {{ disk.usage_percent }}% used
+        Size: {{ disk.size_used_gb }}/{{ disk.size_total_gb }} GB
+        Available: {{ disk.size_available_gb }} GB
+      {% endfor %}
+      {% endfor %}
+      
+      All Hosts Summary:
+      {% for host_data in global_disk_results %}
+      
+      {{ host_data.host }}: {{ host_data.high_usage_count }}/{{ host_data.total_mounts }} filesystems critical
+      {% endfor %}
+      
+      Generated at: {{ ansible_date_time.iso8601 }}
+      
+      Please take immediate action to free up disk space on affected systems.
+  delegate_to: localhost
+  run_once: true
+  when: alert_hosts is defined and alert_hosts | length > 0
+
+- name: Send email alert for high disk usage
+  mail:
+    to: "{{ alert_email }}"
+    subject: "{{ email_subject }}"
+    body: "{{ email_body }}"
+    host: "{{ smtp_server }}"
+    port: "{{ smtp_port }}"
+    username: "{{ smtp_username }}"
+    password: "{{ smtp_password }}"
+    secure: starttls
+  delegate_to: localhost
+  run_once: true
+  when: alert_hosts is defined and alert_hosts | length > 0
+  register: email_result
+  ignore_errors: yes
+
+- name: Display email sending result
+  debug:
+    msg: |
+      Email Alert Status:
+      {% if email_result is succeeded %}
+      ✅ Email alert sent successfully to {{ alert_email }}
+      Subject: {{ email_subject }}
+      Recipients notified about {{ alert_hosts | length }} hosts with high disk usage
+      {% else %}
+      ❌ Failed to send email alert
+      Error: {{ email_result.msg | default('Unknown error') }}
+      Alert email: {{ alert_email }}
+      SMTP server: {{ smtp_server }}:{{ smtp_port }}
+      {% endif %}
+  delegate_to: localhost
+  run_once: true
+  when: alert_hosts is defined and alert_hosts | length > 0
+
+- name: Display no alerts message
+  debug:
+    msg: |
+      ✅ No Disk Usage Alerts
+      All {{ global_disk_results | length }} hosts have disk usage below {{ disk_usage_threshold }}% threshold.
+  delegate_to: localhost
+  run_once: true
+  when: global_disk_results is defined and (alert_hosts is not defined or alert_hosts | length == 0)
+
+# Display comprehensive disk monitoring summary
+- name: Display disk monitoring summary
+  debug:
+    msg: |
+      =====================================
+      Disk Monitoring Summary
+      =====================================
+      Total Hosts Monitored: {{ global_disk_results | length }}
+      Hosts with Alerts: {{ alert_hosts | length if alert_hosts is defined else 0 }}
+      Total Critical Filesystems: {{ total_alerts if total_alerts is defined else 0 }}
+      Alert Threshold: {{ disk_usage_threshold }}%
+      
+      Per-Host Summary:
+      {% for host_data in global_disk_results %}
+      {{ host_data.host }}: {{ host_data.high_usage_count }}/{{ host_data.total_mounts }} critical
+      {% endfor %}
+      =====================================
+  delegate_to: localhost
+  run_once: true
+  when: global_disk_results is defined

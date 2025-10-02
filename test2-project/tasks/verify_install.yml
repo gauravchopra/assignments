@@ -1,0 +1,158 @@
+---
+# Service Verification and Installation Tasks
+# This file contains tasks to verify service installation and install missing services
+
+- name: Display service verification header
+  debug:
+    msg: |
+      =====================================
+      Service Verification and Installation
+      =====================================
+      Host: {{ inventory_hostname }}
+      Service: {{ service_name }}
+      Package: {{ package_name }}
+      =====================================
+
+- name: Check if service package is installed
+  package_facts:
+    manager: auto
+  register: package_facts_result
+
+- name: Set service installation status
+  set_fact:
+    service_installed: "{{ package_name in ansible_facts.packages }}"
+
+- name: Display current service installation status
+  debug:
+    msg: |
+      Service Status Check:
+      - Host: {{ inventory_hostname }}
+      - Service: {{ service_name }}
+      - Package: {{ package_name }}
+      - Installed: {{ service_installed }}
+
+- name: Check service running status (if installed)
+  systemd:
+    name: "{{ service_name }}"
+  register: service_status
+  ignore_errors: yes
+  when: service_installed
+
+- name: Display service running status
+  debug:
+    msg: |
+      Service Runtime Status:
+      - Service: {{ service_name }}
+      - Active: {{ service_status.status.ActiveState | default('unknown') }}
+      - Enabled: {{ service_status.status.UnitFileState | default('unknown') }}
+  when: service_installed and service_status is defined
+
+# Demonstrate installation with httpd service
+- name: Install httpd service (demonstration)
+  block:
+    - name: Install httpd package
+      yum:
+        name: httpd
+        state: present
+      register: httpd_install_result
+
+    - name: Enable httpd service
+      systemd:
+        name: httpd
+        enabled: yes
+      when: httpd_install_result is changed
+
+    - name: Start httpd service
+      systemd:
+        name: httpd
+        state: started
+      when: httpd_install_result is changed
+
+    - name: Verify httpd installation and status
+      systemd:
+        name: httpd
+      register: httpd_verification
+
+    - name: Display httpd installation results
+      debug:
+        msg: |
+          httpd Installation Results:
+          - Installation: {{ 'Success' if httpd_install_result is changed else 'Already installed' }}
+          - Service Active: {{ httpd_verification.status.ActiveState }}
+          - Service Enabled: {{ httpd_verification.status.UnitFileState }}
+          - Process ID: {{ httpd_verification.status.MainPID | default('N/A') }}
+
+    - name: Configure basic httpd settings
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: '^#?ServerName'
+        line: 'ServerName {{ inventory_hostname }}:80'
+        backup: yes
+      notify: restart httpd
+      when: httpd_install_result is changed
+
+  rescue:
+    - name: Handle httpd installation failure
+      debug:
+        msg: |
+          httpd Installation Failed:
+          - Host: {{ inventory_hostname }}
+          - Error: {{ ansible_failed_result.msg | default('Unknown error') }}
+      failed_when: false
+
+  when: inventory_hostname in groups['webservers'] and not service_installed
+
+# Generic service installation check for other services
+- name: Report service installation requirement
+  debug:
+    msg: |
+      Service Installation Required:
+      - Host: {{ inventory_hostname }}
+      - Service: {{ service_name }}
+      - Package: {{ package_name }}
+      - Action: Would install {{ package_name }} package
+      - Note: Installation logic can be implemented similar to httpd example
+  when: not service_installed and inventory_hostname not in groups['webservers']
+
+- name: Create service verification summary
+  set_fact:
+    service_verification_result:
+      host: "{{ inventory_hostname }}"
+      service: "{{ service_name }}"
+      package: "{{ package_name }}"
+      installed: "{{ service_installed }}"
+      running: "{{ service_status.status.ActiveState | default('unknown') if service_installed else 'not_installed' }}"
+      enabled: "{{ service_status.status.UnitFileState | default('unknown') if service_installed else 'not_installed' }}"
+
+- name: Add to global verification results
+  set_fact:
+    global_verification_results: "{{ global_verification_results | default([]) + [service_verification_result] }}"
+  delegate_to: localhost
+  delegate_facts: yes
+
+# Display summary at the end (run once)
+- name: Display service verification summary
+  debug:
+    msg: |
+      =====================================
+      Service Verification Summary
+      =====================================
+      {% for result in global_verification_results %}
+      Host: {{ result.host }}
+        Service: {{ result.service }}
+        Package: {{ result.package }}
+        Installed: {{ result.installed }}
+        Running: {{ result.running }}
+        Enabled: {{ result.enabled }}
+      {% endfor %}
+      =====================================
+  run_once: true
+  delegate_to: localhost
+  when: global_verification_results is defined
+
+# Handlers for service management
+- name: restart httpd
+  systemd:
+    name: httpd
+    state: restarted
+  listen: restart httpd

@@ -1,0 +1,13 @@
+# Core dependencies for rbcapp1 monitoring system
+Flask==2.3.3
+elasticsearch==8.10.0
+requests==2.31.0
+
+# Development and testing dependencies
+pytest==7.4.2
+pytest-mock==3.11.1
+requests-mock==1.11.0
+coverage==7.3.2
+
+# Data handling
+dataclasses-json==0.6.1

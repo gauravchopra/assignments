@@ -1,0 +1,52 @@
+# Ansible Inventory for rbcapp1 Infrastructure
+# This inventory defines the three-server architecture for rbcapp1 services
+
+[webservers]
+host1 ansible_host=192.168.1.10 service_name=httpd service_port=80
+
+[messagequeue]
+host2 ansible_host=192.168.1.11 service_name=rabbitmq-server service_port=5672
+
+[database]
+host3 ansible_host=192.168.1.12 service_name=postgresql service_port=5432
+
+# Group all rbcapp1 infrastructure hosts
+[rbcapp1_infrastructure:children]
+webservers
+messagequeue
+database
+
+# Common variables for all rbcapp1 infrastructure hosts
+[rbcapp1_infrastructure:vars]
+# SSH connection settings
+ansible_user=ansible
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+# Monitoring settings
+disk_usage_threshold=80
+alert_email=admin@example.com
+
+# rbcapp1 API settings (from Test 1)
+rbcapp1_api_host=localhost
+rbcapp1_api_port=5000
+rbcapp1_api_base_url=http://{{ rbcapp1_api_host }}:{{ rbcapp1_api_port }}
+
+# Email notification settings
+smtp_server=smtp.example.com
+smtp_port=587
+smtp_username=monitoring@example.com
+smtp_password=your_smtp_password
+
+# Service package mappings for RHEL
+[webservers:vars]
+package_name=httpd
+service_config_file=/etc/httpd/conf/httpd.conf
+
+[messagequeue:vars]
+package_name=rabbitmq-server
+service_config_file=/etc/rabbitmq/rabbitmq.conf
+
+[database:vars]
+package_name=postgresql-server
+service_config_file=/var/lib/pgsql/data/postgresql.conf

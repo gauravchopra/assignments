@@ -1,0 +1,102 @@
+---
+# rbcapp1 Infrastructure Management Playbook
+# This playbook manages services across multiple RHEL servers based on action variables
+#
+# Usage:
+#   ansible-playbook assignment.yml -i inventory -e action=verify_install
+#   ansible-playbook assignment.yml -i inventory -e action=check-disk
+#   ansible-playbook assignment.yml -i inventory -e action=check-status
+
+- name: rbcapp1 Infrastructure Management
+  hosts: "{{ target_hosts | default('rbcapp1_infrastructure') }}"
+  gather_facts: yes
+  become: yes
+  vars:
+    action: "{{ action | default('help') }}"
+    valid_actions:
+      - verify_install
+      - check-disk
+      - check-status
+      - help
+
+  tasks:
+    - name: Display playbook header
+      debug:
+        msg: |
+          =====================================
+          rbcapp1 Infrastructure Management
+          =====================================
+          Action: {{ action }}
+          Target Hosts: {{ ansible_play_hosts | join(', ') }}
+          =====================================
+      run_once: true
+      delegate_to: localhost
+
+    - name: Validate action parameter
+      fail:
+        msg: |
+          Invalid action: {{ action }}
+          
+          Valid actions are:
+            - verify_install: Verify and install services on designated hosts
+            - check-disk: Check disk usage and send alerts for >80% usage
+            - check-status: Check rbcapp1 application status via REST API
+            - help: Display this help message
+          
+          Usage: ansible-playbook assignment.yml -i inventory -e action=<action_name>
+      when: action not in valid_actions
+      run_once: true
+      delegate_to: localhost
+
+    - name: Display help information
+      debug:
+        msg: |
+          rbcapp1 Infrastructure Management Playbook
+          ==========================================
+          
+          Available Actions:
+          
+          1. verify_install
+             - Verifies services are installed on their designated hosts
+             - Installs missing services (demonstrates with httpd)
+             - Usage: ansible-playbook assignment.yml -i inventory -e action=verify_install
+          
+          2. check-disk
+             - Checks disk space on all servers
+             - Sends email alerts for disk usage > 80%
+             - Usage: ansible-playbook assignment.yml -i inventory -e action=check-disk
+          
+          3. check-status
+             - Returns rbcapp1 application status
+             - Lists services that are down using REST API from Test 1
+             - Usage: ansible-playbook assignment.yml -i inventory -e action=check-status
+          
+          4. help
+             - Displays this help message
+             - Usage: ansible-playbook assignment.yml -i inventory -e action=help
+      when: action == "help"
+      run_once: true
+      delegate_to: localhost
+
+    # Include task files based on action
+    - name: Include service verification and installation tasks
+      include_tasks: tasks/verify_install.yml
+      when: action == "verify_install"
+
+    - name: Include disk space monitoring tasks
+      include_tasks: tasks/check_disk.yml
+      when: action == "check-disk"
+
+    - name: Include status checking tasks
+      include_tasks: tasks/check_status.yml
+      when: action == "check-status"
+
+    - name: Display completion message
+      debug:
+        msg: |
+          =====================================
+          Action '{{ action }}' completed successfully
+          =====================================
+      run_once: true
+      delegate_to: localhost
+      when: action != "help"

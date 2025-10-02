@@ -1,0 +1,31 @@
+---
+# Global variables for all hosts in rbcapp1 infrastructure
+
+# Monitoring Configuration
+disk_usage_threshold: 80
+monitoring_interval: 300  # 5 minutes
+
+# Email Alert Configuration
+alert_email: "admin@example.com"
+smtp_server: "smtp.example.com"
+smtp_port: 587
+smtp_username: "monitoring@example.com"
+# Note: smtp_password should be stored in ansible-vault or environment variable
+smtp_password: "{{ vault_smtp_password | default('your_smtp_password') }}"
+
+# rbcapp1 API Configuration (from Test 1)
+rbcapp1_api_host: "localhost"
+rbcapp1_api_port: 5000
+rbcapp1_api_base_url: "http://{{ rbcapp1_api_host }}:{{ rbcapp1_api_port }}"
+api_timeout: 10
+
+# SSH Configuration
+ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+# Service Management
+service_restart_delay: 5
+service_check_retries: 3
+
+# Logging
+log_level: "INFO"
+enable_debug: false

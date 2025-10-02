@@ -1,0 +1,51 @@
+# Test Inventory for Development and Testing
+# This inventory uses localhost connections for testing
+
+[webservers]
+test-host1 ansible_connection=local ansible_host=localhost service_name=httpd service_port=80
+
+[messagequeue]
+test-host2 ansible_connection=local ansible_host=localhost service_name=rabbitmq-server service_port=5672
+
+[database]
+test-host3 ansible_connection=local ansible_host=localhost service_name=postgresql service_port=5432
+
+# Group all test infrastructure hosts
+[rbcapp1_infrastructure:children]
+webservers
+messagequeue
+database
+
+# Test environment variables
+[rbcapp1_infrastructure:vars]
+# No SSH needed for local testing
+ansible_connection=local
+ansible_python_interpreter={{ ansible_playbook_python }}
+
+# Test monitoring settings
+disk_usage_threshold=80
+alert_email=test@example.com
+
+# Test rbcapp1 API settings
+rbcapp1_api_host=localhost
+rbcapp1_api_port=5000
+rbcapp1_api_base_url=http://{{ rbcapp1_api_host }}:{{ rbcapp1_api_port }}
+
+# Test email settings (will not actually send emails)
+smtp_server=localhost
+smtp_port=25
+smtp_username=test@localhost
+smtp_password=test_password
+
+# Service package mappings for testing
+[webservers:vars]
+package_name=httpd
+service_config_file=/etc/httpd/conf/httpd.conf
+
+[messagequeue:vars]
+package_name=rabbitmq-server
+service_config_file=/etc/rabbitmq/rabbitmq.conf
+
+[database:vars]
+package_name=postgresql-server
+service_config_file=/var/lib/pgsql/data/postgresql.conf
