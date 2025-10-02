@@ -9,10 +9,10 @@
 - Many redundant and over-engineered tests
 
 ### After
-- **2 unit test files** with essential tests only
-- **1 integration test file** with core workflow tests
-- **Total: ~300 lines of test code**
-- **Reduction: ~85% fewer lines**
+- **2 test files** with essential tests only (directly under tests/)
+- **No integration folder** - simplified structure
+- **Total: ~200 lines of test code**
+- **Reduction: ~90% fewer lines**
 
 ## Files Removed
 - `test_app_monitor.py` (500+ lines)
@@ -24,14 +24,12 @@
 - `test_monitoring_workflow.py` (846+ lines)
 
 ## Files Created
-- `test_core_functionality.py` - Essential monitoring logic tests
-- `test_api.py` - Core API endpoint tests
-- `test_workflow.py` - Simplified integration tests
+- `tests/test_core_functionality.py` - Essential monitoring logic tests
+- `tests/test_api.py` - Core API endpoint tests
 
 ## What Was Kept
 - Core functionality tests for service checking
 - Essential API endpoint validation
-- Key integration workflow tests
 - Critical error handling scenarios
 
 ## What Was Removed
@@ -42,16 +40,25 @@
 - Trivial getter/setter tests
 
 ## Benefits
-- **Faster test execution** (0.49s vs several seconds)
+- **Faster test execution** (0.48s vs several seconds)
 - **Easier maintenance** - fewer tests to update
 - **Better focus** on critical functionality
 - **Reduced complexity** while maintaining coverage
-- **20 focused tests** vs 100+ redundant tests
+- **Simplified structure** - no nested folders
+- **16 focused tests** vs 100+ redundant tests
 
 ## Test Results
-All 20 tests pass successfully, covering:
+All 16 tests pass successfully, covering:
 - Service status checking
 - Application monitoring logic
 - API endpoints (add, healthcheck)
 - Elasticsearch integration
-- Main workflow functions
+- Data model validation
+
+## Final Structure
+```
+tests/
+├── __init__.py
+├── test_core_functionality.py  # Core monitoring tests
+└── test_api.py                 # API and Elasticsearch tests
+```
